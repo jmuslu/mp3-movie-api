@@ -7,6 +7,7 @@ from fastapi import FastAPI, File, HTTPException, Query, UploadFile
 from data_pipeline import create_cleaning_report, process_data, validate_dataframe
 from src import (
     HealthResponse,
+    MovieCache,
     MovieDataResponse,
     MovieProcessingReport,
     MovieStorage,
@@ -23,6 +24,7 @@ logger = logging.getLogger(__name__)
 app = FastAPI(title="Data Processing API", version="1.0.0")
 app.middleware("http")(log_requests)  # run log_requests around EVERY request
 storage = MovieStorage()  # module level: ONE shared storage for all requests
+cache = MovieCache()  # module level: ONE shared cache for all requests
 
 
 @app.get("/health", response_model=HealthResponse)
@@ -43,6 +45,7 @@ async def upload_movies(file: UploadFile = File(...)):
     # Reorder the columns to match MOVIE_COLUMNS.
 
     # TODO 3: Call storage.save(df) to replace the current collection.
+    # Part 2: call cache.invalidate() immediately after storage.save() succeeds.
     # Log the filename and saved row count at INFO.
     # Return filename, rows, columns, and column_names for this upload.
     pass
@@ -50,9 +53,15 @@ async def upload_movies(file: UploadFile = File(...)):
 
 @app.get("/movies", response_model=MovieDataResponse)
 def get_movies(limit: int = Query(default=100, ge=1)):
+    # Part 2 TODO 1: Look up the response using cache.get(limit).
+    # If it is not None, log the cache hit at INFO and return it.
+
     # TODO: Use MovieStorage methods to retrieve up to limit rows and count the total number of stored movies.
     # Return {"data": ..., "total_rows": ...}.
     # If empty, return {"data": [], "total_rows": 0}.
+
+    # Part 2 TODO 2: Before the existing return, cache the complete response
+    # using cache.set(limit, response).
     # Log the row count at INFO.
     pass
 
@@ -80,5 +89,6 @@ def process_movies(config: ProcessConfig):
     # cleaning report, logging, and ValueError handling.
 
     # TODO 3: Save the processed DataFrame using storage.save().
+    # Part 2: call cache.invalidate() immediately after storage.save() succeeds.
     # Return validation_rows_removed and cleaning_report without a dataset ID.
     pass

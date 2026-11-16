@@ -1,73 +1,42 @@
-def test_upload_csv(client, sample_csv_bytes):
-    response = client.post(
-        "/upload",
-        files={"file": ("sample_movies.csv", sample_csv_bytes, "text/csv")},
-    )
-    assert response.status_code == 200
-    body = response.json()
-    assert body["filename"] == "sample_movies.csv"
-    assert body["rows"] == 20
-    assert body["columns"] == 4
-    assert body["column_names"] == ["title", "release_year", "rating", "genre"]
+import pytest
+
+from src import MovieStorage
+import main
 
 
-def test_upload_replaces_collection(client, uploaded_movies, sample_csv_bytes):
-    client.post("/upload", files={"file": ("sample_movies.csv", sample_csv_bytes, "text/csv")})
-    assert client.get("/movies").json()["total_rows"] == 20
+def test_movies_persist(client, test_storage, uploaded_movies):
+    # TODO: create another MovieStorage pointing to test_storage.db_path.
+    # Use that object to get the movies and count them.
+    # Check 20 rows, all four DataFrame columns, and the original title order.
+    # Compare IDs from that object's select_columns() with GET /movies?limit=100.
+    # Both should return IDs 1 through 20 in row order.
+    pass
 
 
-def test_upload_rejects_bad_extension(client):
-    response = client.post("/upload", files={"file": ("movies.txt", b"a,b", "text/plain")})
-    assert response.status_code == 400
-    assert client.get("/health").status_code == 200
+def test_cache_and_processing(client, uploaded_movies, processing_body):
+    # TODO 1: GET /movies with limits 100 and 1.
+    # Check 200 and that main.cache.get(limit) equals each response body.
+
+    # TODO 2: repeat limit=100 and check the same response.
+
+    # TODO 3: POST /movies/process using json=processing_body.
+    # Check 200, zero validation removals, and the 20 -> 16 cleaning report.
+    # Confirm both old cache entries are None.
+
+    # TODO 4: retrieve again; check total_rows=16 and titles Movie A through Movie P, in order.
+    # Check IDs 1 through 16 in the retrieved records.
+    # Check that the new response is cached.
+    pass
 
 
-def test_upload_rejects_wrong_columns(client):
-    response = client.post("/upload", files={"file": ("m.csv", b"a,b\n1,2\n", "text/csv")})
-    assert response.status_code == 400
+def test_cache_hit_skips_database(client, uploaded_movies, monkeypatch):
+    # TODO 1: GET /movies with limit=100 to populate the cache.
+    # Assert 200 and keep the response for comparison.
 
+    # TODO 2: Use monkeypatch to replace main.storage.select_columns()
+    # and main.storage.count_movies() with a function that fails the test
+    # if either method is called.
 
-def test_get_movies_limit(client, uploaded_movies):
-    body = client.get("/movies", params={"limit": 2}).json()
-    assert body["total_rows"] == 20
-    assert [m["id"] for m in body["data"]] == [1, 2]
-    assert body["data"][0]["title"] == "Movie A"
-
-
-def test_get_movies_empty(client):
-    assert client.get("/movies").json() == {"data": [], "total_rows": 0}
-
-
-def test_search_default_columns(client, uploaded_movies):
-    response = client.get("/movies/search", params={"min_rating": 8.5, "limit": 2})
-    assert response.status_code == 200
-    assert response.json() == [{"id": 4, "title": "Movie C"}, {"id": 2, "title": "Movie B"}]
-
-
-def test_search_title_and_rating(client, uploaded_movies):
-    response = client.get(
-        "/movies/search",
-        params={"columns": ["title", "rating"], "min_rating": 8.5, "limit": 2},
-    )
-    assert response.json() == [
-        {"id": 4, "title": "Movie C", "rating": 9.0},
-        {"id": 2, "title": "Movie B", "rating": 8.5},
-    ]
-
-
-def test_search_unsupported_column(client, uploaded_movies):
-    response = client.get("/movies/search", params={"columns": ["bogus"]})
-    assert response.status_code == 400
-
-
-def test_process_empty_collection(client, processing_body):
-    assert client.post("/movies/process", json=processing_body).status_code == 400
-
-
-def test_process_removes_duplicates(client, uploaded_movies, processing_body):
-    response = client.post("/movies/process", json=processing_body)
-    assert response.status_code == 200
-    body = response.json()
-    assert body["cleaning_report"]["rows_before"] == 20
-    assert body["cleaning_report"]["rows_after"] < 20
-    assert client.get("/movies").json()["total_rows"] == body["cleaning_report"]["rows_after"]
+    # TODO 3: Repeat the same GET request.
+    # Assert 200 and the same response body as the first request.
+    pass
