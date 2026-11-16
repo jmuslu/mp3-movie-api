@@ -1,5 +1,4 @@
 import io
-import json
 import logging
 from pathlib import Path
 import pandas as pd
@@ -35,54 +34,51 @@ def health_check():
 
 @app.post("/upload", response_model=MovieUploadInfo)
 async def upload_movies(file: UploadFile = File(...)):
-    # TODO 1: .csv check and CSV parsing (same as MP2)
-    suffix = Path(file.filename or "").suffix.____()  # BLANK 1: make the extension lowercase
-    if suffix != "____":  # BLANK 2: the only accepted extension (include the dot)
+    suffix = Path(file.filename or "").suffix.lower()
+    if suffix != ".csv":
         logger.warning("Unsupported file format: %s", suffix)
-        raise HTTPException(status_code=____, detail="Only CSV files are accepted")  # BLANK 3: bad request
+        raise HTTPException(status_code=400, detail="Only CSV files are accepted")
 
-    contents = await file.____()  # BLANK 4: returns the upload as bytes (why await?)
+    contents = await file.read()
     try:
-        df = pd.read_csv(io.BytesIO(____))  # BLANK 5: wrap which variable?
+        df = pd.read_csv(io.BytesIO(contents))
     except (pd.errors.EmptyDataError, pd.errors.ParserError, UnicodeDecodeError) as error:
         logger.warning("Cannot read CSV: %s", error)
         raise HTTPException(status_code=400, detail="Cannot read the uploaded CSV")
 
-    # TODO 2: quick validation before saving
-    if sorted(df.columns) != sorted(____):  # BLANK 6: the required column list
+    if sorted(df.columns) != sorted(MOVIE_COLUMNS):
         logger.warning("Unexpected columns: %s", list(df.columns))
         raise HTTPException(status_code=400, detail=f"CSV must have exactly these columns: {MOVIE_COLUMNS}")
-    if df.____:  # BLANK 7: DataFrame attribute that is True when there are no rows
+    if df.empty:
         logger.warning("Uploaded CSV has no data rows")
         raise HTTPException(status_code=400, detail="CSV must contain at least one data row")
-    df = df[____]  # BLANK 8: reorder the columns to match the required order
+    df = df[MOVIE_COLUMNS]
 
-    # TODO 3: replace the collection, then clear stale cache entries
-    storage.____(df)  # BLANK 9: which storage method replaces all rows?
-    cache.____()  # BLANK 10: only reached if save succeeded (an exception skips this line)
+    storage.save(df)
+    cache.invalidate()  # only reached if save succeeded (an exception skips this line)
     logger.info("Uploaded movies: filename=%s, rows=%s", file.filename, len(df))
     return {
         "filename": file.filename,
-        "rows": len(____),  # BLANK 11
+        "rows": len(df),
         "columns": len(df.columns),
-        "column_names": list(df.____),  # BLANK 12
+        "column_names": list(df.columns),
     }
 
 
 @app.get("/movies", response_model=MovieDataResponse)
 def get_movies(limit: int = Query(default=100, ge=1)):
-    # Part 2: look in the cache BEFORE touching SQLite
-    cached = cache.____(limit)  # BLANK 1
-    if cached is not ____:  # BLANK 2: why "is not None" and not "if cached"? (think: an empty result)
+    # look in the cache BEFORE touching SQLite
+    cached = cache.get(limit)
+    if cached is not None:  # not "if cached": an empty cached result is still a valid hit
         logger.info("Retrieved movies (cache hit): returned_rows=%s", len(cached["data"]))
         return cached
 
-    # Cache miss: read SQLite (an empty table naturally gives data=[] and total_rows=0)
-    records = storage.____(MOVIE_COLUMNS, limit)  # BLANK 3: id plus these columns, ordered by id
-    total = storage.____()  # BLANK 4: SQL COUNT(*) of all stored movies
-    response = {"data": records, "total_rows": ____}  # BLANK 5
+    # cache miss: read SQLite (an empty table naturally gives data=[] and total_rows=0)
+    records = storage.select_columns(MOVIE_COLUMNS, limit)
+    total = storage.count_movies()
+    response = {"data": records, "total_rows": total}
 
-    cache.____(limit, response)  # BLANK 6: store it (right before returning)
+    cache.set(limit, response)
     logger.info("Retrieved movies: returned_rows=%s", len(records))
     return response
 
@@ -96,28 +92,27 @@ def query_movies(
 ):
     # Not cached: every search goes straight to SQL.
     try:
-        results = storage.____(columns, ____, limit)  # BLANK 1-2: method name; the rating filter argument
+        results = storage.query_movies(columns, min_rating, limit)
     except ValueError as error:  # raised for an empty or unsupported column list
         logger.warning("Invalid search: %s", error)
-        raise HTTPException(status_code=____, detail=str(error))  # BLANK 3
-    logger.info("Queried movies: columns=%s, min_rating=%s, returned_rows=%s", columns, min_rating, len(____))  # BLANK 4
+        raise HTTPException(status_code=400, detail=str(error))
+    logger.info("Queried movies: columns=%s, min_rating=%s, returned_rows=%s", columns, min_rating, len(results))
     return results  # [] when nothing matches
 
 
 @app.post("/movies/process", response_model=MovieProcessingReport)
 def process_movies(config: ProcessConfig):
-    # 1. retrieve; an empty collection is a 400 (checked OUTSIDE the try block)
-    df = storage.____()  # BLANK 1
-    if df.____:  # BLANK 2: True when the DataFrame has no rows
+    # retrieve; an empty collection is a 400 (checked OUTSIDE the try block)
+    df = storage.get()
+    if df.empty:
         logger.warning("No movies to process")
-        raise HTTPException(status_code=____, detail="No movies uploaded")  # BLANK 3
+        raise HTTPException(status_code=400, detail="No movies uploaded")
 
-    # 2. same as MP2
-    settings = config.____()  # BLANK 4: Pydantic model -> nested dict
+    settings = config.model_dump()
     validation = settings["validation"]
 
     for col in validation["numeric_columns"]:
-        if col not in df.____:  # BLANK 5: attribute holding the column names
+        if col not in df.columns:
             logger.warning("Numeric column not found: %s", col)
             raise HTTPException(status_code=400, detail=f"Numeric column not found: {col}")
 
@@ -125,19 +120,19 @@ def process_movies(config: ProcessConfig):
         validated = validate_dataframe(
             df,
             validation["required_columns"],
-            validation["____"],  # BLANK 6: the other key inside "validation"
+            validation["numeric_columns"],
         )
-        validation_rows_removed = len(df) - len(____)  # BLANK 7
-        validated_copy = validated.____()  # BLANK 8: copy BEFORE processing
-        processed = process_data(validated, ____)  # BLANK 9: the FULL settings dict
-        cleaning_report = create_cleaning_report(validated_copy, ____)  # BLANK 10
+        validation_rows_removed = len(df) - len(validated)
+        validated_copy = validated.copy()  # copy BEFORE processing
+        processed = process_data(validated, settings)
+        cleaning_report = create_cleaning_report(validated_copy, processed)
     except ValueError as error:
         logger.warning("Processing failed: %s", error)
         raise HTTPException(status_code=400, detail=str(error))
 
-    # 3. write ONLY after validation and processing both succeeded
-    storage.____(processed)  # BLANK 11: replaces all rows in one transaction
-    cache.____()  # BLANK 12: the cached /movies responses are now stale
+    # write ONLY after validation and processing both succeeded
+    storage.save(processed)
+    cache.invalidate()  # the cached /movies responses are now stale
     logger.info(
         "Processed movies: validation_removed=%s, rows_before=%s, rows_after=%s",
         validation_rows_removed,
@@ -145,6 +140,6 @@ def process_movies(config: ProcessConfig):
         cleaning_report["rows_after"],
     )
     return {
-        "validation_rows_removed": ____,  # BLANK 13
-        "cleaning_report": ____,  # BLANK 14
+        "validation_rows_removed": validation_rows_removed,
+        "cleaning_report": cleaning_report,
     }

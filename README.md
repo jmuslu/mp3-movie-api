@@ -1,8 +1,6 @@
 # Movie API
 
-<!-- TODO: Write a paragraph of 5-8 sentences describing the application, its modules
-     (main.py, src/models.py, src/database.py, src/storage.py, src/cache.py,
-     data_pipeline/), and how upload, SQL storage, processing, and caching work together. -->
+This FastAPI application stores one movie collection in a SQLite database and lets clients upload, retrieve, search, and clean it. `main.py` defines the endpoints and wires together the modules in `src/`: `models.py` holds the Pydantic request and response models, `database.py` creates SQLite connections and the `movies` table, `storage.py` runs the SQL for saving, counting, selecting, and filtering movies, and `cache.py` wraps a fakeredis cache. `POST /upload` validates a CSV that has exactly the columns `title`, `release_year`, `rating`, and `genre`, then replaces the whole collection in one transaction. `GET /movies` returns up to `limit` rows plus the total count, and `GET /movies/search` filters by minimum rating using SQL. `POST /movies/process` reads the stored movies, validates and cleans them with the `data_pipeline` modules (duplicate, missing-value, and outlier handling), and saves the result back. Repeated `GET /movies` requests are answered from the cache for 90 seconds, and the cache is cleared after every successful upload or processing run so stale data is never returned. Because the data lives in `data/movies.db`, it survives a server restart.
 
 ## Run the API
 
@@ -18,5 +16,34 @@ python -m pytest tests -v
 
 ## Sample processing request
 
-<!-- TODO: Add one POST /movies/process request body (see tests/conftest.py processing_body)
-     and its expected response for the 20-row sample (validation_rows_removed 0, rows 20 -> 16). -->
+`POST /movies/process` with the 20-row `fixtures/sample_movies.csv` already uploaded:
+
+```json
+{
+  "validation": {
+    "required_columns": ["title", "release_year", "rating", "genre"],
+    "numeric_columns": ["release_year", "rating"]
+  },
+  "processing": {
+    "remove_duplicates": true,
+    "missing": {"enabled": true, "axis": "rows"},
+    "outliers": {"enabled": true, "columns": ["rating"], "method": "iqr", "threshold": 1.5}
+  }
+}
+```
+
+Expected response:
+
+```json
+{
+  "validation_rows_removed": 0,
+  "cleaning_report": {
+    "rows_before": 20,
+    "rows_after": 16,
+    "rows_removed": 4,
+    "columns_before": 4,
+    "columns_after": 4,
+    "columns_removed": 0
+  }
+}
+```
