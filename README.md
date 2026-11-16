@@ -8,11 +8,28 @@ This FastAPI application stores one movie collection in a SQLite database and le
 python -m uvicorn main:app --reload
 ```
 
+Interactive API docs (for demos): http://127.0.0.1:8000/docs
+
 ## Run the tests
 
 ```bash
 python -m pytest tests -v
 ```
+
+## Processing options
+
+The `POST /movies/process` request body accepts these values, which are checked by the MP1 pipeline modules, not by the request models:
+
+- `processing.missing.axis`: `"rows"` or `"columns"`
+- `processing.outliers.method`: `"iqr"` or `"zscore"`
+
+Any other value returns `400` and leaves the stored movies unchanged. These values are only checked when their step is enabled (`missing.enabled` or `outliers.enabled` is `true`). A request body with the wrong types, such as a string where a list is expected, returns `422`.
+
+The column names are specific to the dataset. For the movie sample data:
+
+- `required_columns`: `"title"`, `"release_year"`, `"rating"`, and `"genre"`
+- `numeric_columns`: `"release_year"` and `"rating"`
+- `outliers.columns`: `"rating"`
 
 ## Sample processing request
 
